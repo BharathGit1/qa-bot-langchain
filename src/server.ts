@@ -24,6 +24,7 @@ import {
 import { config } from "./config/index.js";
 import { conversationStore } from "./lib/memory/index.js";
 import { ConversationalRAGChainManager } from "./lib/conversationalRAGChain.js";
+import { ConversationalFilter } from "./lib/conversationalFilter.js";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 
 const app = express();
@@ -153,33 +154,108 @@ app.post("/chat", async (req, res) => {
     const modelInfo = getModelInfo();
     console.log(`[${requestId}] Using model: ${modelInfo.provider}/${modelInfo.model}`);
 
-    // Create chat model and conversational RAG chain
+    // Create chat model
     const model = createChatModel();
-    const ragChain = new ConversationalRAGChainManager(model, memoryManager, retrievalPipeline);
+    
+    // Check if this is a filter query on cached results
+    const isFilterQuery = ConversationalFilter.isFilterQuery(parsed.message);
+    const hasCachedResults = memoryManager.hasSearchResults();
+    const isExistingConversation = !isNewConversation; // User provided conversationId
+    
+    console.log(`[${requestId}] Filter query detected: ${isFilterQuery}`);
+    console.log(`[${requestId}] Has cached results: ${hasCachedResults}`);
+    console.log(`[${requestId}] Existing conversation: ${isExistingConversation}`);
 
-    console.log(`[${requestId}] Processing with conversational RAG chain...`);
     const startTime = Date.now();
+    let response: string;
+    let searchResults: any[];
+    let searchType: string;
 
-    // Execute the chat with RAG (default to hybrid search)
-    const { response, searchResults } = await ragChain.chat(
-      parsed.message,
-      "hybrid",
-      10, // topK
-      requestId
-    );
+    // Use conversational filter if:
+    // 1. It's an existing conversation with cached results AND (filter query OR any follow-up)
+    // 2. Explicit filter keywords detected
+    const shouldUseFilter = hasCachedResults && (isFilterQuery || isExistingConversation);
+
+    if (shouldUseFilter) {
+      console.log(`[${requestId}] 🔍 Using conversational filter on cached results...`);
+      console.log(`[${requestId}]    Reason: ${isFilterQuery ? 'Filter keywords detected' : 'Follow-up on existing conversation'}`);
+      
+      const conversationalFilter = new ConversationalFilter(model);
+      const cachedResults = memoryManager.getLastSearchResults();
+      
+      console.log(`[${requestId}] Filtering ${cachedResults.length} cached results with criteria: "${parsed.message}"`);
+      
+      const { filtered, summary } = await conversationalFilter.filterResults(
+        parsed.message,
+        cachedResults,
+        requestId
+      );
+      
+      searchResults = filtered;
+      response = summary;
+      searchType = "filter";
+      
+      console.log(`[${requestId}] ✅ Filter completed: ${filtered.length}/${cachedResults.length} results matched`);
+      
+      // Save the filter query and response to memory
+      await memoryManager.addExchange(parsed.message, response);
+      
+    } else {
+      // Normal RAG search
+      console.log(`[${requestId}] 🔎 Processing with conversational RAG chain (full search)...`);
+      
+      const ragChain = new ConversationalRAGChainManager(model, memoryManager, retrievalPipeline);
+      
+      const result = await ragChain.chat(
+        parsed.message,
+        "hybrid",
+        10, // topK
+        requestId
+      );
+      
+      response = result.response;
+      searchResults = result.searchResults;
+      searchType = "hybrid";
+      
+      console.log(`[${requestId}] Search results: ${searchResults.length} candidates`);
+      
+      // Cache the search results for potential filtering
+      const structuredResults = searchResults.map(result => ({
+        fileName: result.fileName,
+        email: result.email,
+        phoneNumber: result.phoneNumber,
+        score: result.score,
+        matchType: result.matchType,
+        extractedInfo: (result as any).extractedInfo,
+        llmReasoning: (result as any).llmReasoning,
+      }));
+      
+      memoryManager.setLastSearchResults(structuredResults);
+      console.log(`[${requestId}] Cached ${structuredResults.length} results for potential filtering`);
+    }
 
     const duration = Date.now() - startTime;
-    console.log(`[${requestId}] Chain processing completed in ${duration}ms`);
+    console.log(`[${requestId}] Processing completed in ${duration}ms`);
     console.log(`[${requestId}] Response length: ${response.length} characters`);
-    console.log(`[${requestId}] Search results used: ${searchResults.length} candidates`);
 
     // Get message count
     const messageCount = await memoryManager.getMessageCount();
 
     // Log history if requested
     if (parsed.includeHistory) {
-      await ragChain.logHistory();
+      await memoryManager.logHistory();
     }
+
+    // Format structured search results
+    const structuredResults = searchResults.map(result => ({
+      fileName: result.fileName,
+      email: result.email,
+      phoneNumber: result.phoneNumber,
+      score: result.score,
+      matchType: result.matchType,
+      extractedInfo: (result as any).extractedInfo,
+      llmReasoning: (result as any).llmReasoning,
+    }));
 
     const result: ConversationalQueryResult = {
       response,
@@ -187,6 +263,13 @@ app.post("/chat", async (req, res) => {
       messageCount,
       model: modelInfo.model,
       provider: modelInfo.provider,
+      searchResults: structuredResults,
+      searchMetadata: {
+        query: parsed.message,
+        searchType,
+        resultCount: searchResults.length,
+        duration,
+      },
     };
 
     console.log(`[${requestId}] Sending response to client`);

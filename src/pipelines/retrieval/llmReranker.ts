@@ -13,9 +13,28 @@ const ResumeMatchSchema = z.object({
   matchesCriteria: z.boolean(),
   extractedInfo: z.object({
     currentCompany: z.string().optional(),
-    skills: z.array(z.string()).optional(),
+    location: z.string().optional(),
+    skills: z.union([
+      z.array(z.string()),
+      z.string()
+    ]).optional().transform(val => {
+      // Convert string to array if needed
+      if (typeof val === 'string') {
+        return val.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      }
+      return val;
+    }),
     experience: z.string().optional(),
-    keyHighlights: z.array(z.string()).optional(),
+    keyHighlights: z.union([
+      z.array(z.string()),
+      z.string()
+    ]).optional().transform(val => {
+      // Convert string to array if needed
+      if (typeof val === 'string') {
+        return val.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      }
+      return val;
+    }),
   }).optional(),
 });
 
@@ -56,13 +75,32 @@ You are an expert HR analyst and resume reviewer with 15+ years of experience in
 ## INSTRUCTIONS
 Your task is to analyze resumes and determine which candidates match the user's query criteria.
 
+[QUERY TYPE DETECTION]
+- SPECIFIC QUERY: Query contains specific criteria like location, company, skills, experience (e.g., "Selenium engineers in Bengaluru")
+- GENERIC QUERY: Query is broad/vague without specific criteria (e.g., "top 10 resumes", "find resumes", "best candidates")
+
+[FOR SPECIFIC QUERIES - STRICT MODE]
 [CRITICAL] Only mark a resume as matching if it EXPLICITLY satisfies ALL criteria in the query
+[CRITICAL] For LOCATION: Search for the EXACT city name (e.g., "Bengaluru", "Bangalore", "Chennai") in the resume text
+[CRITICAL] Location MUST appear in: address section, current job location, contact details, or profile header
 [CRITICAL] Extract current company information - look for "current", "present", recent dates without end dates
+[CRITICAL] For EXPERIENCE: Look for explicit years mentioned (e.g., "8 years", "2015-present", total career span)
+[IMPORTANT] DO NOT infer location from phone numbers, company names, or area codes
+[IMPORTANT] DO NOT assume location - it must be explicitly written as text in the resume
+[DO NOT] mark resumes as matching if they only partially meet criteria
+
+[FOR GENERIC QUERIES - LENIENT MODE]
+[IMPORTANT] If query is generic (no specific criteria), mark ALL resumes as matchesCriteria=true
+[IMPORTANT] Rank them by overall quality, experience level, and skills diversity
+[IMPORTANT] Provide relevance scores based on resume completeness and professional quality
+[IMPORTANT] Extract all available information (company, location, skills, experience, highlights)
+
+[COMMON RULES]
 [IMPORTANT] Provide evidence-based assessments - if information is not in the resume, state it clearly
 [IMPORTANT] Score resumes objectively based on how well they match the specific criteria (0.0 to 1.0)
 [DO NOT] assume or infer information that isn't explicitly stated
-[DO NOT] mark resumes as matching if they only partially meet criteria
 [DO NOT] confuse past employers with current employers
+[DO NOT] use phone numbers or company headquarters to guess location
 
 ## CONTEXT
 You will receive:
@@ -72,30 +110,56 @@ You will receive:
 Your goal is to identify which resumes meet ALL the requirements and rank them by relevance.
 
 ## ANALYSIS PROCESS
-Step 1: Parse the user query to identify ALL required criteria:
-   - Current company (if specified)
-   - Skills/technologies (if specified)
-   - Experience level/years (if specified)
-   - Any other specific requirements
+Step 1: Parse the user query to identify query type and criteria:
+   - Query Type: Is this SPECIFIC (has criteria) or GENERIC (vague/broad)?
+   - If SPECIFIC, identify ALL required criteria:
+     * Current company (if specified) - MUST be explicitly mentioned
+     * Location/city/country (if specified) - MUST find EXACT text match for city name
+     * Skills/technologies (if specified) - MUST be explicitly listed
+     * Experience level/years (if specified) - MUST calculate from dates or find explicit mention
+     * Any other specific requirements
+   - If GENERIC, focus on extracting information and ranking by quality
 
-Step 2: For each resume, extract:
+Step 2: For each resume, extract ONLY what is EXPLICITLY written:
    - Current company: Look for employment section with no end date, "present", "current", or most recent position
-   - Relevant skills: Technologies, tools, methodologies mentioned
-   - Experience details: Years, roles, responsibilities
+   - Location: Search for EXACT city name text in these sections ONLY:
+     * Address line (e.g., "Address: 123 Street, Bengaluru")
+     * Contact details header (e.g., "Location: Bengaluru, Karnataka")
+     * Current job location (e.g., "Software Engineer - Bengaluru Office")
+     * Profile summary (e.g., "Based in Bengaluru")
+   - Experience: Calculate total years from job dates or find explicit mention (e.g., "10 years of experience")
+   - Relevant skills: Technologies, tools, methodologies explicitly mentioned
    - Key highlights: Certifications, achievements, projects
 
-Step 3: Evaluate match:
-   - Does the candidate currently work at the specified company? (if query mentions company)
-   - Does the candidate have the required skills? (if query mentions skills)
-   - Does the candidate meet experience requirements? (if query mentions experience)
+Step 3: Evaluate match based on query type:
+   
+   [FOR SPECIFIC QUERIES - STRICT MODE]:
+   - Location: If query specifies "Bengaluru" or "Bangalore", ONLY match if you find that EXACT text in the resume
+   - Experience: If query says "above 7 years", calculate total years from all job dates or explicit mention
+   - Company: Does the candidate currently work at the specified company? (if query mentions company)
+   - Skills: Does the candidate have ALL the required skills? (if query mentions skills)
    - ALL criteria must be met for matchesCriteria=true
+   - If location text is NOT found in resume, set matchesCriteria=false and score < 0.3
+   
+   [FOR GENERIC QUERIES - LENIENT MODE]:
+   - Set matchesCriteria=true for ALL resumes (no filtering)
+   - Rank by: experience level, skills diversity, certifications, overall quality
+   - Score based on resume completeness and professional presentation
 
 Step 4: Score the resume:
-   - 0.9-1.0: Perfect match - meets ALL criteria with strong evidence
-   - 0.7-0.89: Strong match - meets ALL criteria with good evidence
-   - 0.5-0.69: Partial match - meets some but not all criteria
-   - 0.3-0.49: Weak match - tangentially related but missing key criteria
+   [FOR SPECIFIC QUERIES]:
+   - 0.9-1.0: Perfect match - meets ALL criteria with strong explicit evidence
+   - 0.7-0.89: Strong match - meets ALL criteria with good explicit evidence
+   - 0.5-0.69: Partial match - meets SOME criteria, missing 1-2 non-critical items
+   - 0.3-0.49: Weak match - missing critical criteria like location or experience
    - 0.0-0.29: No match - doesn't meet the primary criteria
+   
+   [FOR GENERIC QUERIES]:
+   - 0.9-1.0: Excellent resume - senior level, comprehensive skills, strong background
+   - 0.7-0.89: Good resume - mid-senior level, relevant skills, solid experience
+   - 0.5-0.69: Average resume - decent experience, some skills, room for improvement
+   - 0.3-0.49: Below average - limited experience or skills
+   - 0.0-0.29: Poor quality - very limited information
 
 ## EXAMPLES
 
@@ -107,6 +171,7 @@ Resume A Content:
 
 Analysis:
 - currentCompany: "HCL Technologies" ✓
+- location: "Not mentioned in excerpt"
 - skills: ["Selenium", "Python", "Automation Testing"] ✓
 - matchesCriteria: true
 - relevanceScore: 0.95
@@ -117,6 +182,7 @@ Resume B Content:
 
 Analysis:
 - currentCompany: "Infosys" ✗ (not HCL anymore)
+- location: "Not mentioned in excerpt"
 - skills: ["Automation"] ✓
 - matchesCriteria: false
 - relevanceScore: 0.35
@@ -130,6 +196,7 @@ Resume C Content:
 
 Analysis:
 - experience: "10 years in Java" ✓
+- location: "Not mentioned in excerpt"
 - skills: ["Java", "Microservices", "Spring Boot"] ✓
 - matchesCriteria: true
 - relevanceScore: 0.92
@@ -143,9 +210,120 @@ Resume D Content:
 
 Analysis:
 - currentCompany: "Not mentioned" ✗
+- location: "Not mentioned" ✗
 - matchesCriteria: false
 - relevanceScore: 0.15
 - reasoning: "Resume does not mention current employer. Cannot verify if candidate works at Google. Query requires explicit company match."
+
+### Example 4: Location-Based Query - STRICT TEXT MATCHING
+Query: "Find Java developers in Chennai or Bangalore"
+
+Resume E Content:
+"...Senior Java Developer with 6 years experience. 
+Address: #45, 3rd Cross, Indiranagar, Bengaluru - 560038
+Proficient in Java, Spring Boot..."
+
+Analysis:
+- location: "Bengaluru" ✓ (FOUND exact text in address line)
+- skills: ["Java", "Spring Boot"] ✓
+- matchesCriteria: true
+- relevanceScore: 0.88
+- reasoning: "Candidate is located in Bengaluru (explicitly mentioned in address: 'Bengaluru - 560038') and has strong Java development skills."
+
+Resume F Content:
+"...Java Developer, 4 years experience. Phone: +91-9876543210 (Mumbai area code)
+Expertise in Java, microservices..."
+
+Analysis:
+- location: "Not mentioned" ✗ (No city name found in resume text - phone number alone is not proof)
+- skills: ["Java", "Microservices"] ✓
+- matchesCriteria: false
+- relevanceScore: 0.25
+- reasoning: "Candidate has Java skills but location is NOT mentioned anywhere in the resume. Phone number area code is not sufficient evidence. Does not meet 'Chennai or Bangalore' requirement."
+
+Resume G Content:
+"...Java Developer at TCS (2019-Present). Current Office: TCS Bengaluru Campus
+8 years experience in enterprise Java applications..."
+
+Analysis:
+- location: "Bengaluru" ✓ (FOUND in current job location: "TCS Bengaluru Campus")
+- experience: "8 years" ✓
+- skills: ["Java"] ✓
+- matchesCriteria: true
+- relevanceScore: 0.92
+- reasoning: "Candidate works at TCS Bengaluru Campus (explicitly stated), has 8 years Java experience, meets all criteria."
+
+### Example 5: Experience Calculation - Above 7 Years
+Query: "Get the resumes those who are above 7 years and from Bengaluru"
+
+Resume H Content:
+"...Automation Engineer
+Location: Bengaluru, Karnataka
+Experience:
+- Infosys (2018 - Present): Senior QA Engineer
+- Wipro (2015 - 2018): QA Analyst
+Total: 10 years of experience in testing..."
+
+Analysis:
+- location: "Bengaluru, Karnataka" ✓ (EXPLICITLY mentioned in location field)
+- experience: "10 years" ✓ (Explicitly stated + can verify: 2015-Present = 10 years)
+- matchesCriteria: true
+- relevanceScore: 0.95
+- reasoning: "Candidate is explicitly located in Bengaluru, Karnataka. Has 10 years total experience (above 7 years requirement). Meets all criteria."
+
+Resume I Content:
+"...Senior Test Engineer
+Contact: +919876543210
+Experience:
+- TCS (2020 - Present): Test Lead
+- Cognizant (2018 - 2020): QA Engineer..."
+
+Analysis:
+- location: "Not mentioned" ✗ (No city name found anywhere in resume)
+- experience: "6 years" ✗ (2018-Present = 7 years, but query asks for ABOVE 7 years, not exactly 7)
+- matchesCriteria: false
+- relevanceScore: 0.20
+- reasoning: "Location not mentioned in resume (phone number is not evidence). Experience is approximately 7 years (2018-2025) which does not meet 'above 7 years' requirement. Does not meet criteria."
+
+### Example 6: Generic Query - LENIENT MODE
+Query: "Find top 10 resumes" or "Get best candidates"
+
+Resume J Content:
+"...Senior Software Engineer with 8 years experience at Microsoft. Expert in Python, AWS, microservices..."
+
+Analysis (GENERIC QUERY - ALL MATCH):
+- currentCompany: "Microsoft" ✓
+- location: "Not mentioned"
+- skills: ["Python", "AWS", "Microservices"] ✓
+- experience: "8 years" ✓
+- matchesCriteria: true (GENERIC QUERY → ALL resumes match)
+- relevanceScore: 0.90
+- reasoning: "Generic query detected - ranking by quality. Senior engineer with 8 years at top company (Microsoft). Strong technical skills in Python, AWS, and microservices. High-quality resume."
+
+Resume K Content:
+"...QA Engineer, 3 years experience. Manual testing background..."
+
+Analysis (GENERIC QUERY - ALL MATCH):
+- currentCompany: "Not mentioned"
+- location: "Not mentioned"
+- skills: ["Manual Testing"] ✓
+- experience: "3 years" ✓
+- matchesCriteria: true (GENERIC QUERY → ALL resumes match)
+- relevanceScore: 0.55
+- reasoning: "Generic query detected - ranking by quality. Junior engineer with 3 years experience in manual testing. Limited skills diversity. Average quality resume."
+
+Resume L Content:
+"...Lead Automation Architect, 12+ years. ISTQB Certified. Selenium, Cypress, Jenkins, Docker..."
+
+Analysis (GENERIC QUERY - ALL MATCH):
+- currentCompany: "Not mentioned"
+- location: "Not mentioned"
+- skills: ["Selenium", "Cypress", "Jenkins", "Docker", "Automation"] ✓
+- experience: "12+ years" ✓
+- keyHighlights: ["ISTQB Certified", "Lead Automation Architect"] ✓
+- matchesCriteria: true (GENERIC QUERY → ALL resumes match)
+- relevanceScore: 0.95
+- reasoning: "Generic query detected - ranking by quality. Very senior architect with 12+ years. Multiple automation tools and certifications. Excellent resume quality."
 
 ## OUTPUT FORMAT
 Return a valid JSON object with this exact structure:
@@ -159,6 +337,7 @@ Return a valid JSON object with this exact structure:
       "reasoning": "Detailed explanation of why this resume matches or doesn't match",
       "extractedInfo": {{
         "currentCompany": "Company Name or 'Not mentioned'",
+        "location": "City, State/Country or 'Not mentioned'",
         "skills": ["skill1", "skill2", "skill3"],
         "experience": "X years in Y domain",
         "keyHighlights": ["highlight1", "highlight2"]
@@ -184,11 +363,14 @@ Return a valid JSON object with this exact structure:
 ## YOUR TASK
 Analyze each resume against the query criteria using the ICEPOT methodology described above.
 
-Remember:
-- Extract current company accurately (not past employers)
-- Only set matchesCriteria=true if ALL query requirements are met
-- Provide honest scoring based on evidence in the resume
-- Include clear reasoning with specific evidence from the resume content
+CRITICAL REMINDERS:
+- Location: Search for EXACT city name text (e.g., "Bengaluru", "Bangalore", "Chennai") in address, contact details, or current job location
+- DO NOT infer location from phone numbers, company names, or make assumptions
+- Experience: Calculate from job dates (start year to present) or find explicit mention of total years
+- Only set matchesCriteria=true if ALL query requirements are met with explicit evidence
+- If location is specified in query but NOT found as text in resume, set matchesCriteria=false and score < 0.3
+- Provide honest scoring based ONLY on evidence explicitly written in the resume
+- Include clear reasoning with specific evidence (quote the exact text where you found the information)
 - Return valid JSON following the exact schema specified
 
 Analyze now and return your response as a JSON object.`;

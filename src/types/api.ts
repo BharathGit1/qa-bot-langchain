@@ -23,16 +23,38 @@ export const ConversationalQuerySchema = z.object({
   message: z.string().min(1),
   conversationId: z.string().optional(), // If not provided, a new conversation will be created
   includeHistory: z.boolean().optional().default(true),
+  topK: z.number().min(1).max(100).optional().default(10), // Number of final results to return
 });
 
 export type ConversationalQueryBody = z.infer<typeof ConversationalQuerySchema>;
 
 export type ConversationalQueryResult = {
-  response: string;
+  response: string; // Natural language response
   conversationId: string;
   messageCount: number; // Total messages in this conversation
   model: string;
   provider: string;
+  searchResults?: Array<{
+    fileName: string;
+    email: string;
+    phoneNumber: string;
+    score: number;
+    matchType?: string;
+    extractedInfo?: {
+      currentCompany?: string;
+      location?: string;
+      skills?: string[];
+      experience?: string;
+      keyHighlights?: string[];
+    };
+    llmReasoning?: string;
+  }>; // Structured search results
+  searchMetadata?: {
+    query: string;
+    searchType: string;
+    resultCount: number;
+    duration?: number;
+  };
 };
 
 // Conversation management types

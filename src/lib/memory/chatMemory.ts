@@ -19,11 +19,13 @@ export interface ChatMemoryConfig {
  * - Logging of chat history
  * - Message count limiting
  * - Conversation context retrieval
+ * - Search results caching for conversational filtering
  */
 export class ChatMemoryManager {
   private memory: BufferMemory;
   private maxMessages: number;
   private conversationId: string;
+  private lastSearchResults: any[] = []; // Cache last search results for filtering
 
   constructor(conversationId: string, config?: ChatMemoryConfig) {
     this.conversationId = conversationId;
@@ -148,7 +150,40 @@ export class ChatMemoryManager {
     const historyString = await this.getChatHistoryString();
     console.log(historyString);
     console.log(`[ChatMemory:${this.conversationId}] Total: ${await this.getMessageCount()} messages`);
+    console.log(`[ChatMemory:${this.conversationId}] Cached search results: ${this.lastSearchResults.length}`);
     console.log(`===================================\n`);
+  }
+
+  /**
+   * Store search results for conversational filtering
+   */
+  setLastSearchResults(results: any[]): void {
+    this.lastSearchResults = results;
+    console.log(
+      `[ChatMemory:${this.conversationId}] Cached ${results.length} search results for filtering`
+    );
+  }
+
+  /**
+   * Get cached search results
+   */
+  getLastSearchResults(): any[] {
+    return this.lastSearchResults;
+  }
+
+  /**
+   * Check if there are cached search results
+   */
+  hasSearchResults(): boolean {
+    return this.lastSearchResults.length > 0;
+  }
+
+  /**
+   * Clear cached search results
+   */
+  clearSearchResults(): void {
+    this.lastSearchResults = [];
+    console.log(`[ChatMemory:${this.conversationId}] Cleared cached search results`);
   }
 }
 
