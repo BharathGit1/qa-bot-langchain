@@ -66,8 +66,8 @@ export const config = {
 
   // Hybrid Search Weights
   hybridSearch: {
-    vectorWeight: Number(process.env.HYBRID_VECTOR_WEIGHT) || 0.7,
-    keywordWeight: Number(process.env.HYBRID_KEYWORD_WEIGHT) || 0.3,
+    vectorWeight: Number(process.env.HYBRID_VECTOR_WEIGHT) || 0.3,
+    keywordWeight: Number(process.env.HYBRID_KEYWORD_WEIGHT) || 0.7,
   },
 
   // LLM Re-ranking Configuration
