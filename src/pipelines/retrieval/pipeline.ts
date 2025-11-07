@@ -124,18 +124,51 @@ export class RetrievalPipeline {
     }
 
     console.log(`[${traceId}] [Retrieval Pipeline] Stage 1 complete: ${results.length} candidates retrieved`);
+    
+    // Log retrieved document names/files with scores
+    if (results.length > 0) {
+      console.log(`[${traceId}] [Retrieval Pipeline] 📄 Retrieved Documents (Stage 1):`);
+      results.forEach((result, index) => {
+        console.log(
+          `   ${index + 1}. ${result.fileName} ` +
+          `(score: ${result.score.toFixed(3)}, type: ${result.matchType})`
+        );
+      });
+      console.log(`[${traceId}] [Retrieval Pipeline] ${"=".repeat(60)}`);
+    }
 
     // Stage 2: LLM Re-ranking (if enabled)
     let llmAnalysis: { summary: string; matches: ResumeMatch[] } | undefined;
     
     if (this.llmRerankConfig.enabled && this.llmReranker && results.length > 0) {
       console.log(`[${traceId}] [Retrieval Pipeline] Stage 2: LLM re-ranking & filtering`);
+      console.log(`[${traceId}] [Retrieval Pipeline] 🤖 Sending ${results.length} candidates to LLM for analysis...`);
       
       const rerankedData = await this.llmReranker.rerankAndFilter(query, results, traceId);
       results = rerankedData.results;
       llmAnalysis = rerankedData.llmAnalysis;
 
       console.log(`[${traceId}] [Retrieval Pipeline] Stage 2 complete: ${results.length} candidates after LLM filtering`);
+      
+      // Log which documents passed LLM filtering
+      if (results.length > 0) {
+        console.log(`[${traceId}] [Retrieval Pipeline] ✅ Documents that PASSED LLM Filtering:`);
+        results.forEach((result, index) => {
+          console.log(
+            `   ${index + 1}. ${result.fileName} ` +
+            `(LLM score: ${result.score.toFixed(3)})`
+          );
+        });
+      } else {
+        console.log(`[${traceId}] [Retrieval Pipeline] ⚠️  NO documents passed LLM filtering criteria`);
+      }
+      
+      // Log filtered out documents
+      const filteredOutCount = this.llmRerankConfig.retrievalTopK - results.length;
+      if (filteredOutCount > 0) {
+        console.log(`[${traceId}] [Retrieval Pipeline] ⛔ ${filteredOutCount} documents filtered out by LLM`);
+      }
+      console.log(`[${traceId}] [Retrieval Pipeline] ${"=".repeat(60)}`);
     }
 
     // Limit to requested topK

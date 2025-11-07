@@ -13,9 +13,28 @@ const ResumeMatchSchema = z.object({
   matchesCriteria: z.boolean(),
   extractedInfo: z.object({
     currentCompany: z.string().optional(),
-    skills: z.array(z.string()).optional(),
+    location: z.string().optional(),
+    skills: z.union([
+      z.array(z.string()),
+      z.string()
+    ]).optional().transform(val => {
+      // Convert string to array if needed
+      if (typeof val === 'string') {
+        return val.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      }
+      return val;
+    }),
     experience: z.string().optional(),
-    keyHighlights: z.array(z.string()).optional(),
+    keyHighlights: z.union([
+      z.array(z.string()),
+      z.string()
+    ]).optional().transform(val => {
+      // Convert string to array if needed
+      if (typeof val === 'string') {
+        return val.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      }
+      return val;
+    }),
   }).optional(),
 });
 
@@ -74,18 +93,21 @@ Your goal is to identify which resumes meet ALL the requirements and rank them b
 ## ANALYSIS PROCESS
 Step 1: Parse the user query to identify ALL required criteria:
    - Current company (if specified)
+   - Location/city/country (if specified)
    - Skills/technologies (if specified)
    - Experience level/years (if specified)
    - Any other specific requirements
 
 Step 2: For each resume, extract:
    - Current company: Look for employment section with no end date, "present", "current", or most recent position
+   - Location: Look for city, state, country in contact info or profile section
    - Relevant skills: Technologies, tools, methodologies mentioned
    - Experience details: Years, roles, responsibilities
    - Key highlights: Certifications, achievements, projects
 
 Step 3: Evaluate match:
    - Does the candidate currently work at the specified company? (if query mentions company)
+   - Does the candidate live in/near the specified location? (if query mentions location)
    - Does the candidate have the required skills? (if query mentions skills)
    - Does the candidate meet experience requirements? (if query mentions experience)
    - ALL criteria must be met for matchesCriteria=true
@@ -107,6 +129,7 @@ Resume A Content:
 
 Analysis:
 - currentCompany: "HCL Technologies" ✓
+- location: "Not mentioned in excerpt"
 - skills: ["Selenium", "Python", "Automation Testing"] ✓
 - matchesCriteria: true
 - relevanceScore: 0.95
@@ -117,6 +140,7 @@ Resume B Content:
 
 Analysis:
 - currentCompany: "Infosys" ✗ (not HCL anymore)
+- location: "Not mentioned in excerpt"
 - skills: ["Automation"] ✓
 - matchesCriteria: false
 - relevanceScore: 0.35
@@ -130,6 +154,7 @@ Resume C Content:
 
 Analysis:
 - experience: "10 years in Java" ✓
+- location: "Not mentioned in excerpt"
 - skills: ["Java", "Microservices", "Spring Boot"] ✓
 - matchesCriteria: true
 - relevanceScore: 0.92
@@ -143,9 +168,33 @@ Resume D Content:
 
 Analysis:
 - currentCompany: "Not mentioned" ✗
+- location: "Not mentioned" ✗
 - matchesCriteria: false
 - relevanceScore: 0.15
 - reasoning: "Resume does not mention current employer. Cannot verify if candidate works at Google. Query requires explicit company match."
+
+### Example 4: Location-Based Query
+Query: "Find Java developers in Chennai or Bangalore"
+
+Resume E Content:
+"...Senior Java Developer with 6 years experience. Location: Chennai, Tamil Nadu. Proficient in Java, Spring Boot..."
+
+Analysis:
+- location: "Chennai, Tamil Nadu" ✓
+- skills: ["Java", "Spring Boot"] ✓
+- matchesCriteria: true
+- relevanceScore: 0.88
+- reasoning: "Candidate is located in Chennai (matches query) and has strong Java development skills."
+
+Resume F Content:
+"...Java Developer, 4 years experience. Based in Mumbai. Expertise in Java, microservices..."
+
+Analysis:
+- location: "Mumbai" ✗ (not Chennai or Bangalore)
+- skills: ["Java", "Microservices"] ✓
+- matchesCriteria: false
+- relevanceScore: 0.42
+- reasoning: "Candidate has Java skills but is located in Mumbai, not in the requested Chennai or Bangalore locations."
 
 ## OUTPUT FORMAT
 Return a valid JSON object with this exact structure:
@@ -159,6 +208,7 @@ Return a valid JSON object with this exact structure:
       "reasoning": "Detailed explanation of why this resume matches or doesn't match",
       "extractedInfo": {{
         "currentCompany": "Company Name or 'Not mentioned'",
+        "location": "City, State/Country or 'Not mentioned'",
         "skills": ["skill1", "skill2", "skill3"],
         "experience": "X years in Y domain",
         "keyHighlights": ["highlight1", "highlight2"]
@@ -186,6 +236,7 @@ Analyze each resume against the query criteria using the ICEPOT methodology desc
 
 Remember:
 - Extract current company accurately (not past employers)
+- Extract location from contact info or profile sections (city, state, country)
 - Only set matchesCriteria=true if ALL query requirements are met
 - Provide honest scoring based on evidence in the resume
 - Include clear reasoning with specific evidence from the resume content

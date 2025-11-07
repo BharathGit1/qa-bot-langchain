@@ -31,7 +31,7 @@ export function extractResumeInfo(text: string): ExtractionResult {
       }
     }
   }
-  
+  // Future Forward : Add more meta data like Name, Location, Skills etc. Use Smaller LLM for extraction
   return {
     email: emailMatch ? emailMatch[0] : null,
     phoneNumber,

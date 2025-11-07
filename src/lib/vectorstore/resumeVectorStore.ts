@@ -60,6 +60,7 @@ export class ResumeVectorStore {
 
       console.log(`Connected to MongoDB Vector Store: ${this.config.dbName}.${this.config.collectionName}`);
     } catch (error) {
+      console.error("Error initializing ResumeVectorStore:", error);
       throw new Error(`Failed to initialize vector store: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
